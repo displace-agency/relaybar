@@ -2,9 +2,9 @@
 import PackageDescription
 
 let package = Package(
-    name: "RelayBar",
+    name: "Quota",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "RelayBar", targets: ["ClaudeBar"])],
+    products: [.executable(name: "Quota", targets: ["ClaudeBar"])],
     targets: [
         .executableTarget(
             name: "ClaudeBar",

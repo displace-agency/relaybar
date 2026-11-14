@@ -3,7 +3,7 @@ import AppKit
 import Combine
 
 @main
-struct RelayBarApp: App {
+struct QuotaApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
@@ -13,6 +13,7 @@ struct RelayBarApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem!
+    private var appearanceObservation: NSKeyValueObservation?
     private var popover: NSPopover!
     private var monitor: UsageMonitor!
     private var cancellables = Set<AnyCancellable>()
@@ -30,7 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // hand that to the button. This bypasses the macOS 26 bug where
             // NSStatusBarButton's cell draws attributedTitle + template images
             // at zero alpha on ad-hoc-signed apps.
-            button.image = Self.renderBarImage(text: "⏺ …", color: .white)
+            button.image = Self.renderBarImage(segments: [.init(text: "Quota", tint: .neutral)],
+                textColor: button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .white : .black)
             button.imagePosition = .imageOnly
             button.title = ""
             button.target = self
@@ -51,25 +53,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.updateStatusItemTitle() }
             .store(in: &cancellables)
-        monitor.$menuBarColor
+        monitor.$menuBarSegments
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.updateStatusItemTitle() }
             .store(in: &cancellables)
+        appearanceObservation = statusItem.button?.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.updateStatusItemTitle() }
+        }
     }
 
     private func updateStatusItemTitle() {
         guard let button = statusItem.button else { return }
-        var text = monitor.menuBarText
-        if text.hasPrefix("◐ ") { text = String(text.dropFirst(2)) }
-
-        let color: NSColor
-        switch monitor.menuBarColor {
-        case .green: color = .systemGreen
-        case .amber: color = .systemOrange
-        case .red: color = .systemRed
-        case .neutral: color = .white
+        let dark = button.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        var segments = monitor.menuBarSegments
+        if segments.isEmpty {
+            segments = [.init(text: monitor.menuBarText.replacingOccurrences(of: "◐ ", with: ""), tint: .neutral)]
         }
-        button.image = Self.renderBarImage(text: "⏺ " + text, color: color)
+        button.image = Self.renderBarImage(segments: segments, textColor: dark ? .white : .black)
         button.imagePosition = .imageOnly
         button.title = ""
         button.contentTintColor = nil
@@ -78,13 +78,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Pre-renders the menu bar label into a single non-template NSImage.
     /// Works around a macOS 26 regression where NSStatusBarButton draws
     /// attributedTitle + template images at zero alpha for ad-hoc signed apps.
-    private static func renderBarImage(text: String, color: NSColor) -> NSImage {
+    private static func renderBarImage(segments: [UsageMonitor.MenuBarSegment], textColor: NSColor) -> NSImage {
         let font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize(for: .small), weight: .medium)
-        let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
-        let attr = NSAttributedString(string: text, attributes: attrs)
+        let dotFont = NSFont.systemFont(ofSize: 7)
+        let attr = NSMutableAttributedString()
+        for (index, segment) in segments.enumerated() {
+            if index > 0 { attr.append(NSAttributedString(string: "  ", attributes: [.font: font])) }
+            if segment.tint != .neutral {
+                let dot: NSColor = segment.tint == .red ? .systemRed : .systemOrange
+                attr.append(NSAttributedString(string: "●\u{2009}", attributes: [.font: dotFont, .foregroundColor: dot, .baselineOffset: 1.5]))
+            }
+            attr.append(NSAttributedString(string: segment.text, attributes: [.font: font, .foregroundColor: textColor]))
+        }
 
         let textSize = attr.size()
-        let padding: CGFloat = 4
+        let padding: CGFloat = 2
         let size = NSSize(
             width: ceil(textSize.width) + padding * 2,
             height: NSStatusBar.system.thickness
@@ -123,7 +131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "Refresh", action: #selector(refreshFromMenu), keyEquivalent: "r"))
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quit RelayBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Quota", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         sender.performClick(nil)
         statusItem.menu = nil

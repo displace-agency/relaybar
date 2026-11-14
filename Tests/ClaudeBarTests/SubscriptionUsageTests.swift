@@ -82,6 +82,49 @@ final class SubscriptionUsageTests: XCTestCase {
         XCTAssertEqual(QuotaURLProtocol.count, 1)
     }
 
+    private func profileService(names: [String]) throws -> (SubscriptionUsageService, URL) {
+        let (service, home) = try fixtureService()
+        for name in names {
+            let dir = home.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data(#"{"claudeAiOauth":{"accessToken":"test-placeholder"}}"#.utf8).write(to: dir.appendingPathComponent(".credentials.json"))
+            try Data("{}".utf8).write(to: dir.appendingPathComponent(".claude.json"))
+        }
+        return (SubscriptionUsageService(home: home, environment: [:], session: {
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [QuotaURLProtocol.self]
+            return URLSession(configuration: config)
+        }()), home)
+    }
+
+    func testBackoffIsPerAccountNotPerProvider() async throws {
+        let (service, home) = try profileService(names: [".claude-2", ".claude-3"])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let accounts = service.discoverAccounts().filter { $0.provider == .claude && $0.profile?.isDefault == false }
+        XCTAssertEqual(accounts.count, 2)
+        QuotaURLProtocol.status = 429
+        QuotaURLProtocol.networkError = nil
+        QuotaURLProtocol.count = 0
+        _ = await service.fetch(accounts[0])
+        _ = await service.fetch(accounts[0])
+        XCTAssertEqual(QuotaURLProtocol.count, 1)
+        _ = await service.fetch(accounts[1])
+        XCTAssertEqual(QuotaURLProtocol.count, 2)
+    }
+
+    func testSecondaryProfileExpiredLoginNamesProfileFolder() async throws {
+        let (service, home) = try profileService(names: [".claude-2"])
+        defer { try? FileManager.default.removeItem(at: home) }
+        let account = try XCTUnwrap(service.discoverAccounts().first { $0.profile?.isDefault == false })
+        QuotaURLProtocol.status = 401
+        QuotaURLProtocol.networkError = nil
+        let usage = await service.fetch(account)
+        XCTAssertEqual(usage.error?.contains("CLAUDE_CONFIG_DIR=") == true, true)
+        XCTAssertTrue(usage.error?.hasSuffix(".claude-2 claude") ?? false, usage.error ?? "")
+        XCTAssertEqual(usage.accountID, account.id)
+        XCTAssertFalse(usage.error?.contains("test-placeholder") ?? true)
+    }
+
     func testOfflineAndTimeoutErrorsAreSanitized() async throws {
         let (service, home) = try fixtureService()
         defer { try? FileManager.default.removeItem(at: home) }

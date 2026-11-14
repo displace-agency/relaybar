@@ -46,7 +46,7 @@ struct MenuView: View {
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     switch selectedTab {
-                    case .limits: SubscriptionView(subscriptions: monitor.subscriptions, isLoading: monitor.isLoading)
+                    case .limits: SubscriptionView(accounts: monitor.accounts, subscriptions: monitor.subscriptions, isLoading: monitor.isLoading)
                     case .overview: OverviewTab(snapshot: monitor.snapshot)
                     case .sessions: SessionsTab(snapshot: monitor.snapshot)
                     case .history: HistoryTab(snapshot: monitor.snapshot)
@@ -67,7 +67,7 @@ struct MenuView: View {
     private var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("RelayBar").font(.headline)
+                Text("Quota").font(.headline)
                 Text("Claude + Codex · subscription limits & local activity")
                     .font(.caption2).foregroundStyle(.secondary)
             }

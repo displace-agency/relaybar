@@ -6,14 +6,16 @@ final class UsageMonitor: ObservableObject {
     @Published var selectedProvider: SubscriptionProvider = .claude {
         didSet { snapshot = snapshots[selectedProvider] ?? .empty }
     }
-    @Published var subscriptions: [SubscriptionProvider: SubscriptionUsage] = [:]
+    @Published var accounts: [SubscriptionAccount] = [.defaultClaude, .codexAccount]
+    @Published var subscriptions: [String: SubscriptionUsage] = [:]
     @Published var menuBarText: String = "◐ …"
-    @Published var menuBarColor: MenuBarTint = .neutral
+    @Published var menuBarSegments: [MenuBarSegment] = []
     @Published var lastUpdated: Date?
     @Published var lastError: String?
     @Published var isLoading = false
 
-    enum MenuBarTint { case neutral, green, amber, red }
+    enum MenuBarTint { case neutral, amber, red }
+    struct MenuBarSegment: Equatable { let text: String; let tint: MenuBarTint }
 
     private var snapshots: [SubscriptionProvider: UsageSnapshot] = [:]
     private var timer: Timer?
@@ -66,13 +68,21 @@ final class UsageMonitor: ObservableObject {
             updateLoading()
             quotaTask = Task { @MainActor [weak self] in
                 guard let self else { return }
-                async let claude = self.quotaService.fetch(.claude)
-                async let codex = self.quotaService.fetch(.codex)
-                let results = await [claude, codex]
-                guard !Task.isCancelled else { return }
-                for result in results {
-                    self.subscriptions[result.provider] = Self.retainingLastKnown(result, previous: self.subscriptions[result.provider])
+                let service = self.quotaService
+                let accounts = await Task.detached { service.discoverAccounts() }.value
+                let results = await withTaskGroup(of: SubscriptionUsage.self) { group in
+                    for account in accounts { group.addTask { await service.fetch(account) } }
+                    var out: [SubscriptionUsage] = []
+                    for await usage in group { out.append(usage) }
+                    return out
                 }
+                guard !Task.isCancelled else { return }
+                self.accounts = accounts
+                for result in results {
+                    self.subscriptions[result.key] = Self.retainingLastKnown(result, previous: self.subscriptions[result.key])
+                }
+                let live = Set(accounts.map(\.id))
+                self.subscriptions = self.subscriptions.filter { live.contains($0.key) }
                 self.quotaInflight = false
                 self.updateLoading()
                 self.refreshMenuBar()
@@ -83,31 +93,46 @@ final class UsageMonitor: ObservableObject {
     static func retainingLastKnown(_ result: SubscriptionUsage, previous: SubscriptionUsage?) -> SubscriptionUsage {
         guard result.error != nil, let previous, previous.weekly != nil || previous.session != nil else { return result }
         return SubscriptionUsage(provider: result.provider, weekly: previous.weekly, session: previous.session,
-                                 fetchedAt: previous.fetchedAt, error: result.error, plan: previous.plan)
+                                 fetchedAt: previous.fetchedAt, error: result.error, plan: previous.plan,
+                                 accountID: result.accountID, label: result.label)
     }
 
     private func updateLoading() { isLoading = localInflight || quotaInflight }
 
-    private func refreshMenuBar() {
-        let pieces = SubscriptionProvider.allCases.compactMap { provider -> String? in
-            guard let usage = subscriptions[provider], let weekly = usage.weekly else { return nil }
-            let name = provider == .claude ? "C" : "O"
-            let stale = usage.error != nil || Date().timeIntervalSince(usage.fetchedAt) > 180
+    /// `C` for a single Claude account, `C1`, `C2`, ... for two or more; `O` for Codex.
+    static func menuBarText(accounts: [SubscriptionAccount], subscriptions: [String: SubscriptionUsage], now: Date = Date()) -> String {
+        let pieces = menuBarSegments(accounts: accounts, subscriptions: subscriptions, now: now).map(\.text)
+        return pieces.isEmpty ? "◐ Quota" : "◐ " + pieces.joined(separator: "  ")
+    }
+
+    /// One compact reading per account. Low accounts get a tint; the text itself stays plain.
+    static func menuBarSegments(accounts: [SubscriptionAccount], subscriptions: [String: SubscriptionUsage], now: Date = Date()) -> [MenuBarSegment] {
+        let claudeCount = accounts.filter { $0.provider == .claude }.count
+        var claudeIndex = 0
+        return accounts.compactMap { account -> MenuBarSegment? in
+            var name = "O"
+            if account.provider == .claude {
+                claudeIndex += 1
+                name = claudeCount > 1 ? "C\(claudeIndex)" : "C"
+            }
+            guard let usage = subscriptions[account.id], let weekly = usage.weekly else { return nil }
+            let stale = usage.error != nil || now.timeIntervalSince(usage.fetchedAt) > 180
             let countdown: String
-            if let reset = weekly.resetsAt, reset > Date(), reset.timeIntervalSinceNow < 31_557_600 {
-                countdown = weekly.countdown(at: Date())
+            var live = false
+            if let reset = weekly.resetsAt, reset > now, reset.timeIntervalSince(now) < 31_557_600 {
+                let minutes = Int(ceil(reset.timeIntervalSince(now) / 60))
+                countdown = minutes >= 1440 ? "\(minutes / 1440)d" : minutes >= 60 ? "\(minutes / 60)h" : "\(minutes)m"
+                live = !stale
             } else {
                 countdown = weekly.resetsAt == nil ? "?" : "due"
             }
-            return "\(name) \(stale ? "~" : "")\(countdown)"
+            let tint: MenuBarTint = !live ? .neutral : weekly.usedPercent >= 90 ? .red : weekly.usedPercent >= 70 ? .amber : .neutral
+            return MenuBarSegment(text: "\(name)\u{2009}\(stale ? "~" : "")\(countdown)", tint: tint)
         }
-        menuBarText = pieces.isEmpty ? "◐ RelayBar" : "◐ " + pieces.joined(separator: " · ")
-        let values = subscriptions.values.filter { $0.error == nil && Date().timeIntervalSince($0.fetchedAt) <= 180 }
-            .compactMap { usage -> Double? in
-                guard let window = usage.weekly, let reset = window.resetsAt, reset > Date() else { return nil }
-                return window.usedPercent
-            }
-        guard let used = values.max() else { menuBarColor = .neutral; return }
-        menuBarColor = used >= 90 ? .red : used >= 70 ? .amber : .green
+    }
+
+    private func refreshMenuBar() {
+        menuBarSegments = Self.menuBarSegments(accounts: accounts, subscriptions: subscriptions)
+        menuBarText = Self.menuBarText(accounts: accounts, subscriptions: subscriptions)
     }
 }

@@ -22,7 +22,7 @@ private struct FileCache {
 final class TranscriptParser {
     static let shared = TranscriptParser()
 
-    private let projectsRoot: URL
+    private let roots: () -> [URL]
     private let blockDuration: TimeInterval = 5 * 60 * 60
     private var fileCache: [String: FileCache] = [:]
     private var sessionHints: [String: String] = [:]
@@ -35,10 +35,10 @@ final class TranscriptParser {
         pattern: #"CLIENTS/(?:\*[^/\s"]+/)?([A-Za-z][A-Za-z0-9_. -]*?)(?=[/"\\])"#
     )
 
-    init() {
+    /// Roots are re-read on every snapshot so a profile added later is picked up.
+    init(roots: (() -> [URL])? = nil) {
         self.iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        self.projectsRoot = home.appendingPathComponent(".claude/projects", isDirectory: true)
+        self.roots = roots ?? { ClaudeProfile.discover().map(\.projectsRoot) }
     }
 
     func snapshot() -> UsageSnapshot {
@@ -86,7 +86,7 @@ final class TranscriptParser {
     }
 
     private func loadAllEvents() -> [RawEvent] {
-        guard let files = Self.globJSONLFiles(root: projectsRoot) else { return [] }
+        let files = roots().flatMap { Self.globJSONLFiles(root: $0) ?? [] }
         var allEvents: [RawEvent] = []
         var livePaths: Set<String> = []
         sessionHints.removeAll(keepingCapacity: true)

@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>RelayBar</string>
+    <string>Quota</string>
     <key>CFBundleIdentifier</key>
     <string>agency.displace.ClaudeBar</string>
     <key>CFBundleName</key>
-    <string>RelayBar</string>
+    <string>Quota</string>
     <key>CFBundleDisplayName</key>
-    <string>RelayBar</string>
+    <string>Quota</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>1.1.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key>

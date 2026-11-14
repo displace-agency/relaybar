@@ -1,12 +1,12 @@
 # Validation
 
-RelayBar is tested at three levels:
+Quota is tested at three levels:
 
 - **Offline fixtures:** cumulative Codex records, active/archive deduplication, resumed sessions, cache accounting, partial trailing lines, calendar ranges, quota window parsing, countdown boundaries, malformed responses, HTTP errors, timeout handling, rate-limit backoff, and stale-reading recovery.
 - **Opt-in live checks:** fetch each configured subscription's weekly usage and reset time. These checks require an existing login and print only sanitized quota summaries.
 - **Offscreen native rendering:** light, dark, and unavailable states. OCR checks confirm the actual provider names, percentages, and countdowns are present. This catches empty renders that image-dimension checks miss.
 
-The initial RelayBar release passed the offline suite, both live quota checks, and visual review of the rendered interface. Apple Silicon and Intel binaries are built together. Native installation and launch were also checked on the development Mac.
+The initial Quota release passed the offline suite, both live quota checks, and visual review of the rendered interface. Apple Silicon and Intel binaries are built together. Native installation and launch were also checked on the development Mac.
 
 ## Running tests
 

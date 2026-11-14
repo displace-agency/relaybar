@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-APP_NAME="RelayBar"
-VERSION="${1:-1.0.0}"
+APP_NAME="Quota"
+VERSION="${1:-1.1.0}"
 if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9.]+)?$ ]]; then
-    echo "Invalid version: use a version such as 1.0.0." >&2
+    echo "Invalid version: use a version such as 1.1.0." >&2
     exit 1
 fi
 BUILD_ROOT="build"

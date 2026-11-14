@@ -1,7 +1,8 @@
 import SwiftUI
 
 struct SubscriptionView: View {
-    let subscriptions: [SubscriptionProvider: SubscriptionUsage]
+    var accounts: [SubscriptionAccount] = [.defaultClaude, .codexAccount]
+    let subscriptions: [String: SubscriptionUsage]
     let isLoading: Bool
     @Environment(\.subscriptionPreviewDate) private var previewDate
 
@@ -17,8 +18,8 @@ struct SubscriptionView: View {
 
     private func content(now: Date) -> some View {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(SubscriptionProvider.allCases, id: \.self) { provider in
-                    providerCard(provider, now: now)
+                ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                    providerCard(account, number: multipleClaude && account.provider == .claude ? claudeNumber(index) : nil, now: now)
                 }
                 Text("Codex limits apply to Codex usage on your ChatGPT plan. Local token totals are separate activity records.")
                     .font(.caption2)
@@ -26,12 +27,19 @@ struct SubscriptionView: View {
             }
     }
 
-    private func providerCard(_ provider: SubscriptionProvider, now: Date) -> some View {
-        let usage = subscriptions[provider]
+    private var multipleClaude: Bool { accounts.filter { $0.provider == .claude }.count > 1 }
+
+    private func claudeNumber(_ index: Int) -> Int { accounts[...index].filter { $0.provider == .claude }.count }
+
+    private func providerCard(_ account: SubscriptionAccount, number: Int?, now: Date) -> some View {
+        let usage = subscriptions[account.id]
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(provider == .claude ? "Claude" : "Codex")
+                Text(number.map { "Claude \($0)" } ?? account.provider.title)
                     .font(.system(size: 13, weight: .semibold))
+                if number != nil {
+                    Text(account.label).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                }
                 if let plan = usage?.plan, !plan.isEmpty {
                     Text(plan).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }

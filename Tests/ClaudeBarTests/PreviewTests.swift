@@ -26,11 +26,11 @@ final class PreviewTests: XCTestCase {
         let now = Date()
         let monitor = UsageMonitor(startAutomatically: false)
         monitor.subscriptions = [
-            .claude: SubscriptionUsage(provider: .claude,
+            "claude": SubscriptionUsage(provider: .claude,
                 weekly: SubscriptionWindow(usedPercent: 37, resetsAt: now.addingTimeInterval(3 * 86400 + 7 * 3600), durationMinutes: 10080),
                 session: SubscriptionWindow(usedPercent: 18, resetsAt: now.addingTimeInterval(2 * 3600 + 23 * 60), durationMinutes: 300),
                 fetchedAt: now, error: nil, plan: "Max"),
-            .codex: SubscriptionUsage(provider: .codex,
+            "codex": SubscriptionUsage(provider: .codex,
                 weekly: SubscriptionWindow(usedPercent: 76, resetsAt: now.addingTimeInterval(86400 + 4 * 3600), durationMinutes: 10080),
                 session: SubscriptionWindow(usedPercent: 29, resetsAt: now.addingTimeInterval(3 * 3600 + 10 * 60), durationMinutes: 300),
                 fetchedAt: now, error: nil, plan: "Pro")
@@ -54,12 +54,12 @@ final class PreviewTests: XCTestCase {
             XCTAssertTrue(recognized.contains("Resets in 1d 4h"), recognized)
             try png.write(to: output.appendingPathComponent("\(name).png"))
         }
-        monitor.subscriptions = [.claude: SubscriptionUsage(provider: .claude, weekly: nil, session: nil,
+        monitor.subscriptions = ["claude": SubscriptionUsage(provider: .claude, weekly: nil, session: nil,
             fetchedAt: now, error: "Session expired or access denied. Open the CLI to reconnect.", plan: nil)]
         let bitmap = try render(MenuView(monitor: monitor).environment(\.controlActiveState, .active)
                 .environment(\.subscriptionPreviewDate, now).environment(\.colorScheme, .light).background(Color(white: 0.98)))
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("limits-unavailable.png"))
-        try Data("Disposable RelayBar QA previews. Synthetic subscription fixtures only. Rendered offscreen without activating an app or capturing the screen.\n".utf8)
+        try Data("Disposable Quota QA previews. Synthetic subscription fixtures only. Rendered offscreen without activating an app or capturing the screen.\n".utf8)
             .write(to: output.appendingPathComponent("MANIFEST.txt"))
     }
 

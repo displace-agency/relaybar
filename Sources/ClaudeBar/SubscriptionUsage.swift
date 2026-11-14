@@ -1,6 +1,5 @@
 import Foundation
 import Darwin
-import CryptoKit
 
 enum SubscriptionProvider: String, CaseIterable, Identifiable {
     case claude, codex
@@ -32,15 +31,20 @@ struct SubscriptionUsage {
     let fetchedAt: Date
     let error: String?
     let plan: String?
+    var accountID: String? = nil
+    var label: String? = nil
+    var key: String { accountID ?? provider.rawValue }
 }
 
 private enum SubscriptionError: Error {
     case credentials, keychain, unsupportedProfile, response, http(Int)
+    case profile(String)
     var message: String {
         switch self {
         case .credentials: return "Open the CLI and sign in to read subscription usage."
         case .keychain: return "Claude credentials are unavailable from Keychain."
         case .unsupportedProfile: return "The selected Claude profile has no readable credentials."
+        case .profile(let message): return message
         case .response: return "The provider returned no readable usage windows."
         case .http(401), .http(403): return "Session expired or access denied. Open the CLI to reconnect."
         case .http(429): return "Usage checks are rate limited. Try again later."
@@ -56,22 +60,32 @@ final class SubscriptionUsageService {
     private let home: URL
     private let environment: [String: String]
     private let session: URLSession
+    private let fileManager: FileManager
     private let backoffLock = NSLock()
-    private var retryAfter: [SubscriptionProvider: Date] = [:]
+    private var retryAfter: [String: Date] = [:]
 
-    private func isBackingOff(_ provider: SubscriptionProvider) -> Bool {
+    private func isBackingOff(_ id: String) -> Bool {
         backoffLock.lock(); defer { backoffLock.unlock() }
-        return (retryAfter[provider] ?? .distantPast) > Date()
+        return (retryAfter[id] ?? .distantPast) > Date()
     }
 
-    private func backOff(_ provider: SubscriptionProvider) {
+    private func backOff(_ id: String) {
         backoffLock.lock(); defer { backoffLock.unlock() }
-        retryAfter[provider] = Date().addingTimeInterval(300)
+        retryAfter[id] = Date().addingTimeInterval(300)
+    }
+
+    /// Re-run on every refresh so a profile signed in later appears without relaunch.
+    func discoverAccounts() -> [SubscriptionAccount] {
+        ClaudeProfile.discover(home: home, environment: environment, fileManager: fileManager).map {
+            SubscriptionAccount(id: $0.id, provider: .claude, label: $0.label(home: home), profile: $0)
+        } + [.codexAccount]
     }
 
     init(home: URL = FileManager.default.homeDirectoryForCurrentUser,
          environment: [String: String] = ProcessInfo.processInfo.environment,
-         session: URLSession? = nil) {
+         session: URLSession? = nil,
+         fileManager: FileManager = .default) {
+        self.fileManager = fileManager
         self.home = home
         self.environment = environment
         if let session { self.session = session } else {
@@ -86,30 +100,45 @@ final class SubscriptionUsageService {
     }
 
     func fetch(_ provider: SubscriptionProvider) async -> SubscriptionUsage {
+        await fetch(provider == .claude ? discoverAccounts()[0] : SubscriptionAccount.codexAccount)
+    }
+
+    func fetch(_ account: SubscriptionAccount) async -> SubscriptionUsage {
+        let provider = account.provider
         do {
-            if isBackingOff(provider) { throw SubscriptionError.http(429) }
-            let request = try makeRequest(provider)
+            if isBackingOff(account.id) { throw SubscriptionError.http(429) }
+            let request = try makeRequest(account)
             let (data, response) = try await session.data(for: request)
             guard let response = response as? HTTPURLResponse else { throw SubscriptionError.response }
             guard response.statusCode == 200 else {
-                if response.statusCode == 429 { backOff(provider) }
+                if response.statusCode == 429 { backOff(account.id) }
                 throw SubscriptionError.http(response.statusCode)
             }
-            return try Self.parse(data, provider: provider)
+            var usage = try Self.parse(data, provider: provider)
+            usage.accountID = account.id
+            usage.label = account.label
+            return usage
         } catch {
-            let message = (error as? SubscriptionError)?.message
+            var message = (error as? SubscriptionError)?.message
                 ?? ((error as? URLError)?.code == .timedOut
                     ? "Usage check timed out. Try again later."
                     : "Usage is unavailable. Check your connection and try again.")
-            return SubscriptionUsage(provider: provider, weekly: nil, session: nil,
-                                     fetchedAt: Date(), error: message, plan: nil)
+            if let profile = account.profile, !profile.isDefault, let error = error as? SubscriptionError {
+                switch error {
+                case .http(401), .http(403), .credentials, .keychain, .unsupportedProfile:
+                    message = "Login expired for this account. Open Claude with that profile folder: CLAUDE_CONFIG_DIR=\(profile.displayPath(home: home)) claude"
+                default: break
+                }
+            }
+            return SubscriptionUsage(provider: provider, weekly: nil, session: nil, fetchedAt: Date(),
+                                     error: message, plan: nil, accountID: account.id, label: account.label)
         }
     }
 
-    private func makeRequest(_ provider: SubscriptionProvider) throws -> URLRequest {
+    private func makeRequest(_ account: SubscriptionAccount) throws -> URLRequest {
         var request: URLRequest
-        if provider == .claude {
-            let data = try claudeCredentials()
+        if account.provider == .claude {
+            let data = try claudeCredentials(account.profile ?? ClaudeProfile(directory: home.appendingPathComponent(".claude"), isDefault: true))
             guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let oauth = json["claudeAiOauth"] as? [String: Any],
                   let token = oauth["accessToken"] as? String, !token.isEmpty else { throw SubscriptionError.credentials }
@@ -133,25 +162,17 @@ final class SubscriptionUsageService {
         request.httpMethod = "GET"
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("RelayBar/1.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Quota/1.1", forHTTPHeaderField: "User-Agent")
         return request
     }
 
-    private func claudeCredentials() throws -> Data {
-        let config = environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 }
-        let secure = environment["CLAUDE_SECURESTORAGE_CONFIG_DIR"] ?? config ?? ""
-        var services = ["Claude Code-credentials"]
-        if !secure.isEmpty {
-            let hash = SHA256.hash(data: Data(secure.precomposedStringWithCanonicalMapping.utf8)).map { String(format: "%02x", $0) }.joined()
-            services = ["Claude Code-credentials-\(hash.prefix(8))"]
-        }
-        for service in services {
+    private func claudeCredentials(_ profile: ClaudeProfile) throws -> Data {
+        for service in profile.keychainServices {
             if let data = Self.keychainCredential(service: service) { return data }
         }
         // Claude's file fallback is read only; the active Keychain always wins.
-        let directory = config.map { URL(fileURLWithPath: $0) } ?? home.appendingPathComponent(".claude")
-        if let data = try? Data(contentsOf: directory.appendingPathComponent(".credentials.json")) { return data }
-        throw secure.isEmpty ? SubscriptionError.keychain : SubscriptionError.unsupportedProfile
+        if let data = try? Data(contentsOf: profile.directory.appendingPathComponent(".credentials.json")) { return data }
+        throw profile.isDefault ? SubscriptionError.keychain : SubscriptionError.unsupportedProfile
     }
 
     /// Use Apple's already trusted helper. A new unsigned app cannot directly read
