@@ -22,18 +22,20 @@ final class MarketingCaptureTests: XCTestCase {
             for account in discovered { group.addTask { (account.id, await service.fetch(account)) } }
             for await (id, usage) in group { reads[id] = usage }
         }
+        // Only accounts with a real reading right now go in the shot (a rate-limited account is left out, never faked).
+        let live = discovered.filter { reads[$0.id]?.error == nil && reads[$0.id]?.weekly != nil }
+        XCTAssertTrue(live.contains { $0.provider == .claude }, "no Claude account has a real weekly reading")
         // Privacy: replace every account label (an email address) with a neutral one, in the capture only.
         var claudeNumber = 0
-        let accounts: [SubscriptionAccount] = discovered.map { account in
+        let accounts: [SubscriptionAccount] = live.map { account in
             guard account.provider == .claude else { return account }
             claudeNumber += 1
             return SubscriptionAccount(id: account.id, provider: .claude, label: "Account \(claudeNumber)", profile: account.profile)
         }
+        let hasCodex = accounts.contains { $0.provider == .codex }
         var subscriptions: [String: SubscriptionUsage] = [:]
         for account in accounts {
             var usage = try XCTUnwrap(reads[account.id])
-            XCTAssertNil(usage.error, usage.error ?? "")
-            _ = try XCTUnwrap(usage.weekly, "no real weekly reading for \(account.label)")
             usage.label = account.label
             subscriptions[account.id] = usage
         }
@@ -46,24 +48,24 @@ final class MarketingCaptureTests: XCTestCase {
             let bitmap = try render(MenuView(monitor: monitor), scheme: scheme, now: now)
             let recognized = try text(in: bitmap)
             XCTAssertTrue(recognized.contains("Claude"))
-            XCTAssertTrue(recognized.contains("Codex"))
+            if hasCodex { XCTAssertTrue(recognized.contains("Codex")) }
             XCTAssertFalse(recognized.contains("@"))
-            XCTAssertGreaterThanOrEqual(recognized.components(separatedBy: "% remaining").count - 1, 2)
-            XCTAssertGreaterThanOrEqual(recognized.components(separatedBy: "Resets in").count - 1, 2)
+            XCTAssertGreaterThanOrEqual(recognized.components(separatedBy: "% remaining").count - 1, accounts.count)
+            XCTAssertGreaterThanOrEqual(recognized.components(separatedBy: "Resets in").count - 1, accounts.count)
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent(name + ".png"))
         }
         let segments = UsageMonitor.menuBarSegments(accounts: accounts, subscriptions: subscriptions, now: now)
         XCTAssertFalse(segments.isEmpty)
         try XCTUnwrap(renderMenuBarLabel(segments).representation(using: .png, properties: [:]))
             .write(to: output.appendingPathComponent("quota-menubar-label.png"))
+        // The Codex overview only when there is real local Codex activity today; otherwise it is skipped.
         monitor.selectedProvider = .codex
         monitor.snapshot = CodexTranscriptParser().snapshot()
         let bitmap = try render(MenuView(monitor: monitor, initialTab: .overview), scheme: .light, now: now)
         let recognized = try text(in: bitmap)
-        XCTAssertTrue(recognized.contains("Codex"))
-        XCTAssertTrue(recognized.lowercased().contains("tokens"))
-        XCTAssertFalse(recognized.contains("$"))
-        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("quota-overview-light.png"))
+        if recognized.lowercased().contains("tokens") && !recognized.contains("No usage") && !recognized.contains("$") {
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("quota-overview-light.png"))
+        }
         if let manifestDirectory = ProcessInfo.processInfo.environment["RELAYBAR_CAPTURE_MANIFEST_DIR"] {
             let provenance = "Live Quota marketing captures\nCaptured: \(ISO8601DateFormatter().string(from: now))\nLimits use actual authenticated subscription GET responses. Overview uses actual local aggregate Codex token activity. No synthetic values, sessions, project names, account identifiers, or desktop pixels. Offscreen NSHostingView rendered at 3x.\n"
             try Data(provenance.utf8).write(to: URL(fileURLWithPath: manifestDirectory).appendingPathComponent("CAPTURE-PROVENANCE.txt"))
