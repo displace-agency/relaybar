@@ -24,7 +24,11 @@ final class MarketingCaptureTests: XCTestCase {
         }
         // Only accounts with a real reading right now go in the shot (a rate-limited account is left out, never faked).
         let live = discovered.filter { reads[$0.id]?.error == nil && reads[$0.id]?.weekly != nil }
-        XCTAssertTrue(live.contains { $0.provider == .claude }, "no Claude account has a real weekly reading")
+        // Stop before writing anything: a capture with no live Claude reading would overwrite good PNGs with empty ones.
+        guard live.contains(where: { $0.provider == .claude }) else {
+            XCTFail("no Claude account has a real weekly reading (rate limited?); nothing written")
+            return
+        }
         // Privacy: replace every account label (an email address) with a neutral one, in the capture only.
         var claudeNumber = 0
         let accounts: [SubscriptionAccount] = live.map { account in
@@ -110,7 +114,7 @@ final class MarketingCaptureTests: XCTestCase {
             attr.append(NSAttributedString(string: segment.text, attributes: [.font: font, .foregroundColor: NSColor(white: 0.1, alpha: 1)]))
         }
         let textSize = attr.size()
-        let pad: CGFloat = 10, height: CGFloat = 24, scale: CGFloat = 3
+        let pad: CGFloat = 10, height: CGFloat = 24, scale: CGFloat = 12 // large enough to show on its own in a page frame
         let size = NSSize(width: ceil(textSize.width) + pad * 2, height: height)
         let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(height * scale),
             bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))

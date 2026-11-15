@@ -7,7 +7,7 @@ A free, open-source Mac menu bar app. Formerly RelayBar and ClaudeBar.
 [**Download Quota 1.1.0 for Mac**](https://github.com/displace-agency/relaybar/releases/latest/download/Quota.dmg) · [Report an issue](https://github.com/displace-agency/relaybar/issues)
 
 <p align="center">
-  <img src="docs/screenshots/relaybar-limits-light.png" width="420" alt="Quota showing Claude and Codex weekly quota remaining and reset countdowns" />
+  <img src="docs/screenshots/quota-limits-light.png" width="420" alt="Quota showing the weekly Claude limit remaining and when it resets" />
 </p>
 
 ## Get started
@@ -32,8 +32,8 @@ Requires **macOS 13 or later**, on Apple Silicon or Intel, and an existing **Cla
 - **Launch at login:** an optional native setting.
 
 <p align="center">
-  <img src="docs/screenshots/relaybar-limits-dark.png" width="360" alt="Quota weekly countdowns in dark mode" />
-  <img src="docs/screenshots/relaybar-codex-overview.png" width="360" alt="Quota showing real local Codex token activity and model usage" />
+  <img src="docs/screenshots/quota-limits-dark.png" width="360" alt="Quota in dark mode" />
+  <img src="docs/screenshots/quota-menubar-label.png" width="180" alt="Quota menu bar label with a weekly reset countdown" />
 </p>
 
 Screenshots show real readings captured during development. Your percentages, reset dates, and available windows will differ.
