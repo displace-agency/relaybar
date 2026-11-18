@@ -17,6 +17,9 @@ final class QuotaPreviewCaptureTests: XCTestCase {
         let output = URL(fileURLWithPath: directory, isDirectory: true)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
         let now = Date()
+        let local0 = UsageMonitor(startAutomatically: false)
+        local0.selectedProvider = .claude
+        local0.snapshot = Self.fakeSnapshot(now: now)
 
         func usage(_ provider: SubscriptionProvider, weekly: Double?, session: Double?, error: String? = nil, plan: String? = nil,
                    resetDays: Double = 3.3, id: String? = nil, label: String? = nil) -> SubscriptionUsage {
@@ -34,6 +37,17 @@ final class QuotaPreviewCaptureTests: XCTestCase {
         ]
         monitor.lastUpdated = now
         try save(MenuView(monitor: monitor), "01-limits", now, output)
+
+        // 1b. One Claude weekly limit only (like a live capture): the popover must fit, no empty canvas.
+        let one = UsageMonitor(startAutomatically: false)
+        one.accounts = [.defaultClaude]
+        one.subscriptions = ["claude": usage(.claude, weekly: 23, session: nil)]
+        one.lastUpdated = now
+        try save(MenuView(monitor: one), "01b-limits-one-card", now, output)
+        let oneHeight = RenderSupport.fittedHeight(MenuView(monitor: one).environment(\.subscriptionPreviewDate, now))
+        let fullHeight = RenderSupport.fittedHeight(MenuView(monitor: local0, initialTab: .overview).environment(\.subscriptionPreviewDate, now))
+        XCTAssertLessThan(oneHeight, 330, "one card must not leave an empty block")
+        XCTAssertEqual(fullHeight, 520, "tall content is capped at the maximum height")
 
         // 2. Several Claude accounts: low, limit reached, expired reset, error with last reading.
         let a1 = SubscriptionAccount(id: "c1", provider: .claude, label: "demo.one@example.com", profile: nil)
@@ -74,6 +88,31 @@ final class QuotaPreviewCaptureTests: XCTestCase {
             .write(to: output.appendingPathComponent("MANIFEST.txt"))
     }
 
+    /// The hosting controller's preferred size (what NSPopover follows) changes with the tab and with loaded data.
+    @MainActor
+    func testPreferredContentSizeFollowsTabAndData() throws {
+        let now = Date()
+        let monitor = UsageMonitor(startAutomatically: false)
+        monitor.accounts = [.defaultClaude]
+        monitor.selectedProvider = .claude
+        monitor.snapshot = Self.fakeSnapshot(now: now)
+        let controller = NSHostingController(rootView: MenuView(monitor: monitor).environment(\.subscriptionPreviewDate, now))
+        controller.sizingOptions = .preferredContentSize
+        let window = NSWindow(contentViewController: controller) // never shown
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 520)
+        RenderSupport.spin(controller.view)
+        let empty = controller.preferredContentSize.height
+        monitor.subscriptions = ["claude": SubscriptionUsage(provider: .claude,
+            weekly: SubscriptionWindow(usedPercent: 40, resetsAt: now.addingTimeInterval(86400), durationMinutes: 10080),
+            session: SubscriptionWindow(usedPercent: 10, resetsAt: now.addingTimeInterval(3600), durationMinutes: 300),
+            fetchedAt: now, error: nil, plan: nil)]
+        RenderSupport.spin(controller.view)
+        let loaded = controller.preferredContentSize.height
+        XCTAssertGreaterThan(loaded, empty, "accounts loading grows the popover")
+        XCTAssertLessThan(loaded, 520)
+        _ = window
+    }
+
     private static func fakeSnapshot(now: Date) -> UsageSnapshot {
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd"
@@ -112,20 +151,9 @@ final class QuotaPreviewCaptureTests: XCTestCase {
 
     @MainActor
     private func save<V: View>(_ view: V, _ name: String, _ now: Date, _ output: URL) throws {
-        let w = 420 * scale, h = 520 * scale
-        let root = view.environment(\.subscriptionPreviewDate, now)
-            .environment(\.colorScheme, .dark) // MenuView must force light itself
-            .scaleEffect(scale, anchor: .topLeading)
-            .frame(width: w, height: h, alignment: .topLeading)
-        let hosting = NSHostingView(rootView: root)
-        hosting.appearance = NSAppearance(named: .darkAqua)
-        hosting.frame = NSRect(x: 0, y: 0, width: w, height: h)
-        hosting.wantsLayer = true
-        hosting.layoutSubtreeIfNeeded()
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(w), pixelsHigh: Int(h),
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
-        bitmap.size = NSSize(width: w, height: h)
-        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+        // Host appearance is dark on purpose: MenuView must force its own light look.
+        let bitmap = try RenderSupport.render(view.environment(\.subscriptionPreviewDate, now).environment(\.colorScheme, .dark),
+                                              scale: scale, appearance: .darkAqua)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent(name + ".png"))
     }
 

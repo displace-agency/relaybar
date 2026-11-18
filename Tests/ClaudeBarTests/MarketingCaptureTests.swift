@@ -72,8 +72,19 @@ final class MarketingCaptureTests: XCTestCase {
         if recognized.lowercased().contains("tokens") && !recognized.contains("No usage") && !recognized.contains("$") {
             try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("quota-overview-light.png"))
         }
+        // The Claude overview: local aggregate transcript totals only (no sessions, project names or accounts, no network),
+        // and only when there is real local Claude activity today.
+        monitor.selectedProvider = .claude
+        monitor.snapshot = TranscriptParser.shared.snapshot()
+        if let today = monitor.snapshot.today, today.totalTokens > 0 {
+            let claudeBitmap = try render(MenuView(monitor: monitor, initialTab: .overview), scheme: .light, now: now)
+            let claudeText = try text(in: claudeBitmap)
+            XCTAssertFalse(claudeText.contains("@"))
+            XCTAssertTrue(claudeText.lowercased().contains("tokens"))
+            try XCTUnwrap(claudeBitmap.representation(using: .png, properties: [:])).write(to: output.appendingPathComponent("quota-overview-claude.png"))
+        }
         if let manifestDirectory = ProcessInfo.processInfo.environment["RELAYBAR_CAPTURE_MANIFEST_DIR"] {
-            let provenance = "Live Quota marketing captures\nCaptured: \(ISO8601DateFormatter().string(from: now))\nLimits use actual authenticated subscription GET responses. Overview uses actual local aggregate Codex token activity. No synthetic values, sessions, project names, account identifiers, or desktop pixels. Offscreen NSHostingView rendered at 3x.\n"
+            let provenance = "Live Quota marketing captures\nCaptured: \(ISO8601DateFormatter().string(from: now))\nLimits use actual authenticated subscription GET responses. Overviews use actual local aggregate Claude and Codex token activity. No synthetic values, sessions, project names, account identifiers, or desktop pixels. Offscreen NSHostingView rendered at 3x.\n"
             try Data(provenance.utf8).write(to: URL(fileURLWithPath: manifestDirectory).appendingPathComponent("CAPTURE-PROVENANCE.txt"))
         }
     }
@@ -138,38 +149,9 @@ final class MarketingCaptureTests: XCTestCase {
         return (request.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
     }
 
+    /// 3x bitmap as tall as the fitted popover (no empty canvas), light look.
     @MainActor
     private func render<V: View>(_ view: V, scheme: ColorScheme, now: Date) throws -> NSBitmapImageRep {
-        let root = view.environment(\.subscriptionPreviewDate, now)
-            .environment(\.colorScheme, scheme)
-            .tint(Color.blue)
-            .accentColor(.blue)
-            .background(scheme == .dark ? Color(white: 0.12) : Color(white: 0.98))
-        let hosting = NSHostingView(rootView: root.scaleEffect(3, anchor: .topLeading)
-            .frame(width: 1260, height: 1560, alignment: .topLeading))
-        hosting.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
-        hosting.frame = NSRect(x: 0, y: 0, width: 1260, height: 1560)
-        hosting.wantsLayer = true
-        hosting.layoutSubtreeIfNeeded()
-        func sharpen(_ layer: CALayer) {
-            layer.contentsScale = 3
-            layer.shouldRasterize = false
-            layer.sublayers?.forEach(sharpen)
-            layer.setNeedsDisplay()
-        }
-        func sharpenViews(_ view: NSView) {
-            view.wantsLayer = true
-            if let layer = view.layer { sharpen(layer) }
-            view.subviews.forEach(sharpenViews)
-            view.needsDisplay = true
-            view.displayIfNeeded()
-        }
-        sharpenViews(hosting)
-        let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 1260, pixelsHigh: 1560,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-            bytesPerRow: 0, bitsPerPixel: 0))
-        bitmap.size = NSSize(width: 1260, height: 1560)
-        hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
-        return bitmap
+        try RenderSupport.render(view.environment(\.subscriptionPreviewDate, now), scale: 3)
     }
 }

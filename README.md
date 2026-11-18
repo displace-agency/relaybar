@@ -32,11 +32,10 @@ Requires **macOS 13 or later**, on Apple Silicon or Intel, and an existing **Cla
 - **Launch at login:** an optional native setting.
 
 <p align="center">
-  <img src="docs/screenshots/quota-limits-dark.png" width="360" alt="Quota in dark mode" />
   <img src="docs/screenshots/quota-menubar-label.png" width="180" alt="Quota menu bar label with a weekly reset countdown" />
 </p>
 
-Screenshots show real readings captured during development. Your percentages, reset dates, and available windows will differ.
+Quota always uses its light look, in light and dark macOS, and the popover is only as tall as its content. The screenshots come from one opt-in live capture and show real readings: the light Limits view, the menu bar label, the Claude Overview (only with real local Claude activity), and the Codex Overview (only with real local Codex activity). Overviews use local aggregate token totals only. Your percentages, reset dates, and available windows will differ.
 
 ## What the numbers mean
 

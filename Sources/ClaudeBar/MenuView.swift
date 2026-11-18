@@ -5,6 +5,8 @@ struct MenuView: View {
     @ObservedObject var monitor: UsageMonitor
     @State private var selectedTab: Tab = .limits
     @State private var launchAtLogin: Bool = SMAppService.mainApp.status == .enabled
+    /// Natural height of the active tab's content; the scroll area fits it up to the popover's maximum.
+    @State private var contentHeight: CGFloat = 0
 
     enum Tab: String, CaseIterable, Identifiable {
         case limits = "Limits"
@@ -40,13 +42,20 @@ struct MenuView: View {
                 }
                 .environment(\.showsAPICost, monitor.selectedProvider == .claude)
                 .padding(DS.Spacing.m)
+                .frame(width: DS.Layout.popover.width, alignment: .topLeading)
+                .background(GeometryReader { proxy in
+                    Color.clear.preference(key: ContentHeightKey.self, value: proxy.size.height)
+                })
             }
-            .frame(maxHeight: .infinity)
+            .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
+            // Fits the content; shrinks (and scrolls) once the popover reaches its maximum height.
+            .frame(minHeight: 0, idealHeight: contentHeight, maxHeight: contentHeight)
             .background(DS.canvas)
             DSHairline()
             footer
         }
-        .frame(width: DS.Layout.popover.width, height: DS.Layout.popover.height)
+        .frame(width: DS.Layout.popover.width)
+        .frame(maxHeight: DS.Layout.popover.height, alignment: .top)
         .background(DS.surface)
         // The brand look is light in both macOS appearances.
         .environment(\.colorScheme, .light)
@@ -167,6 +176,11 @@ struct MenuView: View {
         .padding(.vertical, DS.Spacing.s)
         .background(DS.surface)
     }
+}
+
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 // MARK: - Shared pieces

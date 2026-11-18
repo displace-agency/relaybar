@@ -43,12 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover = NSPopover()
         popover.behavior = .transient
         popover.animates = true
-        popover.contentSize = NSSize(width: 420, height: 520)
+        popover.contentSize = NSSize(width: 420, height: 300)
         popover.appearance = NSAppearance(named: .aqua)
         popover.delegate = self
-        popover.contentViewController = NSHostingController(
-            rootView: MenuView(monitor: monitor)
-        )
+        // The popover follows the hosted view's fitting height (content, up to 520), also when a tab or the data changes.
+        let hosting = NSHostingController(rootView: MenuView(monitor: monitor))
+        hosting.sizingOptions = .preferredContentSize
+        popover.contentViewController = hosting
 
         monitor.$menuBarText
             .receive(on: DispatchQueue.main)
