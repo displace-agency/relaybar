@@ -17,108 +17,109 @@ struct SubscriptionView: View {
     }
 
     private func content(now: Date) -> some View {
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
-                    providerCard(account, number: multipleClaude && account.provider == .claude ? claudeNumber(index) : nil, now: now)
-                }
-                Text("Codex limits apply to Codex usage on your ChatGPT plan. Local token totals are separate activity records.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: DS.Spacing.l) {
+            ForEach(Array(accounts.enumerated()), id: \.element.id) { index, account in
+                accountSection(account, name: Self.accountName(accounts, index), numbered: multipleClaude && account.provider == .claude, now: now)
             }
+            Text("Codex limits apply to Codex usage on your ChatGPT plan. Local token totals are separate activity records.")
+                .dsCaption()
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var multipleClaude: Bool { accounts.filter { $0.provider == .claude }.count > 1 }
 
-    private func claudeNumber(_ index: Int) -> Int { accounts[...index].filter { $0.provider == .claude }.count }
-
-    private func providerCard(_ account: SubscriptionAccount, number: Int?, now: Date) -> some View {
-        let usage = subscriptions[account.id]
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(number.map { "Claude \($0)" } ?? account.provider.title)
-                    .font(.system(size: 13, weight: .semibold))
-                if number != nil {
-                    Text(account.label).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }
-                if let plan = usage?.plan, !plan.isEmpty {
-                    Text(plan).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Spacer()
-                if isLoading {
-                    ProgressView().controlSize(.small).scaleEffect(0.7)
-                } else if let usage {
-                    Text(usage.error != nil ? "Needs attention" : "Updated \(usage.fetchedAt.formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 10)).foregroundStyle(usage.error != nil ? .orange : .secondary)
-                }
-            }
-            if let weekly = usage?.weekly {
-                window(weekly, title: "Weekly", prominent: true, now: now)
-            } else {
-                Text(isLoading && usage == nil ? "Reading weekly limits…" : "Weekly limit unavailable")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if let session = usage?.session {
-                Divider()
-                HStack {
-                    Text("Session · \(Int(min(100, max(0, 100 - session.usedPercent))))% left")
-                    Spacer()
-                    Text(session.resetsAt == nil ? "Reset unavailable" : "Resets in \(session.countdown(at: now))")
-                }
-                .font(.caption2).foregroundStyle(.secondary)
-                .help(session.resetsAt.map { "Session resets " + $0.formatted(date: .abbreviated, time: .shortened) } ?? "Reset time unavailable")
-            }
-            if let error = usage?.error {
-                if usage?.weekly != nil || usage?.session != nil {
-                    Text("Last known reading").font(.caption2).fontWeight(.medium).foregroundStyle(.orange)
-                }
-                Text(error).font(.caption2).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
-            } else if let usage, now.timeIntervalSince(usage.fetchedAt) > 180 {
-                Text("Last reading is over 3 minutes old. Refresh to check current limits.")
-                    .font(.caption2).foregroundStyle(.orange)
-            } else if usage == nil && !isLoading {
-                Text("Refresh to read this subscription.").font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .padding(12)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
+    /// "Claude", "Claude 2" (with several Claude accounts) or "Codex".
+    static func accountName(_ accounts: [SubscriptionAccount], _ index: Int) -> String {
+        let account = accounts[index]
+        guard account.provider == .claude, accounts.filter({ $0.provider == .claude }).count > 1 else { return account.provider.title }
+        return "Claude \(accounts[...index].filter { $0.provider == .claude }.count)"
     }
 
-    private func window(_ quota: SubscriptionWindow, title: String, prominent: Bool, now: Date) -> some View {
+    private func accountSection(_ account: SubscriptionAccount, name: String, numbered: Bool, now: Date) -> some View {
+        let usage = subscriptions[account.id]
+        let hasReading = usage?.weekly != nil || usage?.session != nil
+        return VStack(alignment: .leading, spacing: DS.Spacing.s) {
+            if let weekly = usage?.weekly {
+                limitCard(name: name, title: "Weekly", quota: weekly, account: account, usage: usage, showsAccount: numbered, now: now)
+            } else {
+                unavailableCard(name: name, account: account, usage: usage, showsAccount: numbered)
+            }
+            if let session = usage?.session {
+                limitCard(name: name, title: session.durationMinutes == 300 ? "5-hour" : "Session", quota: session,
+                          account: account, usage: nil, showsAccount: false, now: now)
+            }
+            if let error = usage?.error {
+                DSNotice(title: hasReading ? "Last known reading" : "Needs attention", message: error)
+            } else if let usage, now.timeIntervalSince(usage.fetchedAt) > 180 {
+                DSNotice(title: "Reading is out of date", message: "Last reading is over 3 minutes old. Refresh to check current limits.")
+            } else if usage == nil && !isLoading {
+                Text("Refresh to read this subscription.").dsCaption()
+            }
+        }
+    }
+
+    private func cardHeader(_ eyebrow: String, account: SubscriptionAccount, usage: SubscriptionUsage?, showsAccount: Bool) -> some View {
+        HStack(spacing: DS.Spacing.s) {
+            Text(eyebrow).dsEyebrow().lineLimit(1)
+            Spacer(minLength: DS.Spacing.s)
+            if showsAccount {
+                Text(account.label).dsCaption().lineLimit(1).truncationMode(.middle)
+            }
+            if let plan = usage?.plan, !plan.isEmpty {
+                Text(plan).dsCaption().lineLimit(1)
+            }
+        }
+    }
+
+    private func unavailableCard(name: String, account: SubscriptionAccount, usage: SubscriptionUsage?, showsAccount: Bool) -> some View {
+        VStack(alignment: .leading, spacing: DS.Spacing.s) {
+            cardHeader("\(name) \u{00B7} Weekly", account: account, usage: usage, showsAccount: showsAccount)
+            Text(isLoading && usage == nil ? "Reading weekly limits\u{2026}" : "Weekly limit unavailable")
+                .font(DS.bodyFont).foregroundColor(DS.inkSecondary)
+        }
+        .padding(DS.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
+    }
+
+    private func limitCard(name: String, title: String, quota: SubscriptionWindow, account: SubscriptionAccount,
+                           usage: SubscriptionUsage?, showsAccount: Bool, now: Date) -> some View {
         let remaining = min(100, max(0, 100 - quota.usedPercent))
         let expired = quota.resetsAt.map { $0 <= now } ?? false
-        return VStack(alignment: .leading, spacing: prominent ? 6 : 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(title).font(.caption).foregroundStyle(.secondary)
-                Spacer()
-                Text(String(format: "%.0f%% remaining", remaining))
-                    .font(.system(size: prominent ? 19 : 12, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundStyle(expired ? .secondary : .primary)
+        let reached = !expired && remaining < 0.5
+        let low = !expired && !reached && remaining < 20
+        return VStack(alignment: .leading, spacing: DS.Spacing.s) {
+            cardHeader("\(name) \u{00B7} \(title)", account: account, usage: usage, showsAccount: showsAccount)
+            HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.xs) {
+                Text(String(format: "%.0f%%", remaining))
+                    .font(DS.bigNumber(28))
+                    .foregroundColor(expired ? DS.inkSecondary : reached ? DS.danger : DS.ink)
+                Text("left").dsCaption()
+                Spacer(minLength: DS.Spacing.s)
+                if expired { DSPill(style: .outline, label: "Reset due") }
+                else if reached { DSPill(style: .reached, label: "Limit reached") }
+                else if low { DSPill(style: .low, label: "Low") }
             }
-            if prominent {
-                GeometryReader { geometry in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.secondary.opacity(0.12))
-                        Capsule().fill(remaining <= 10 ? Color.orange : Color.accentColor)
-                            .frame(width: geometry.size.width * remaining / 100)
-                    }
-                }
-                .frame(height: 6)
-                .accessibilityLabel("\(title): \(Int(remaining)) percent remaining")
-            }
+            DSProgressBar(remaining: remaining, muted: expired)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(title): \(Int(remaining)) percent left")
             if let reset = quota.resetsAt {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(expired ? "Reset due · refresh to verify" : "Resets in \(quota.countdown(at: now))")
-                        .font(.system(size: prominent && !expired ? 19 : 12, weight: prominent ? .medium : .regular, design: .rounded))
-                        .monospacedDigit()
+                HStack(alignment: .firstTextBaseline, spacing: DS.Spacing.s) {
+                    Text(expired ? "Reset due \u{00B7} refresh to verify" : "Resets in \(quota.countdown(at: now))")
+                        .font(DS.bodyMedium).monospacedDigit().foregroundColor(DS.ink)
+                    Spacer(minLength: DS.Spacing.s)
                     Text(reset.formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))
-                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                        .dsCaption().lineLimit(1)
                 }
                 .help("Reset time in \(TimeZone.current.identifier)")
             } else {
-                Text("Reset time unavailable").font(.caption2).foregroundStyle(.secondary)
+                Text("Reset time unavailable").dsCaption()
             }
         }
+        .padding(DS.Spacing.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dsCard()
     }
 }
 

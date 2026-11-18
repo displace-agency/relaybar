@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 420, height: 520)
+        popover.appearance = NSAppearance(named: .aqua)
         popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: MenuView(monitor: monitor)
